@@ -43,4 +43,7 @@ private:
     QLabel *m_leftView{};
     QLabel *m_rightView{};
     QLabel *m_diffView{};
+    QLabel *m_navLabel{};
+
+    void updateNavLabel();
 };

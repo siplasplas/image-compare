@@ -102,6 +102,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     selectors->addLayout(buildSelector(tr("Right image..."), m_rightEdit, m_rightBtn), 1);
     root->addLayout(selectors);
 
+    m_navLabel = new QLabel();
+    m_navLabel->setAlignment(Qt::AlignCenter);
+    root->addWidget(m_navLabel);
+
     // ---- middle: two image previews ---------------------------------------
     auto *previews = new QHBoxLayout();
     auto makeView = [&]() {
@@ -147,6 +151,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(prev, &QShortcut::activated, this, [this] { navigate(-1); });
     connect(next, &QShortcut::activated, this, [this] { navigate(+1); });
 
+    updateNavLabel();
     resize(1100, 800);
 }
 
@@ -332,6 +337,18 @@ void MainWindow::rebuildNavigation() {
             break;
         }
     }
+    updateNavLabel();
+}
+
+void MainWindow::updateNavLabel() {
+    if (!m_navLabel) return;
+    if (m_navPairs.isEmpty() || m_navIndex < 0) {
+        m_navLabel->setText(tr("No paired navigation"));
+    } else {
+        m_navLabel->setText(tr("Pair %1 / %2  (PageUp / PageDown)")
+                                .arg(m_navIndex + 1)
+                                .arg(m_navPairs.size()));
+    }
 }
 
 void MainWindow::navigate(int delta) {
@@ -346,4 +363,5 @@ void MainWindow::navigate(int delta) {
     updateThumb(m_leftView, p.first, m_leftPix);
     updateThumb(m_rightView, p.second, m_rightPix);
     tryCompare();
+    updateNavLabel();
 }
