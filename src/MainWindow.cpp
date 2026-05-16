@@ -1,14 +1,22 @@
 #include "MainWindow.h"
 
+#include <QCollator>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QSet>
+#include <QShortcut>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <algorithm>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -47,6 +55,24 @@ void setLabelPixmap(QLabel *label, const QPixmap &pix) {
         return;
     }
     label->setPixmap(pix.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+}
+
+const QStringList &imageFilters() {
+    static const QStringList f{"*.png", "*.jpg", "*.jpeg", "*.bmp",
+                               "*.tif", "*.tiff", "*.webp"};
+    return f;
+}
+
+QStringList listImages(const QString &dir) {
+    return QDir(dir).entryList(imageFilters(), QDir::Files | QDir::Readable);
+}
+
+void naturalSort(QStringList &list) {
+    QCollator c;
+    c.setNumericMode(true);
+    c.setCaseSensitivity(Qt::CaseInsensitive);
+    std::sort(list.begin(), list.end(),
+              [&c](const QString &a, const QString &b) { return c.compare(a, b) < 0; });
 }
 
 } // namespace
@@ -106,11 +132,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(m_leftEdit, &QLineEdit::editingFinished, this, [this] {
         updateThumb(m_leftView, m_leftEdit->text(), m_leftPix);
         tryCompare();
+        rebuildNavigation();
     });
     connect(m_rightEdit, &QLineEdit::editingFinished, this, [this] {
         updateThumb(m_rightView, m_rightEdit->text(), m_rightPix);
         tryCompare();
+        rebuildNavigation();
     });
+
+    auto *prev = new QShortcut(QKeySequence(Qt::Key_PageUp), this);
+    auto *next = new QShortcut(QKeySequence(Qt::Key_PageDown), this);
+    prev->setContext(Qt::ApplicationShortcut);
+    next->setContext(Qt::ApplicationShortcut);
+    connect(prev, &QShortcut::activated, this, [this] { navigate(-1); });
+    connect(next, &QShortcut::activated, this, [this] { navigate(+1); });
 
     resize(1100, 800);
 }
@@ -121,6 +156,7 @@ void MainWindow::setImages(const QString &left, const QString &right) {
     updateThumb(m_leftView, left, m_leftPix);
     updateThumb(m_rightView, right, m_rightPix);
     tryCompare();
+    rebuildNavigation();
 }
 
 void MainWindow::browseLeft() {
@@ -132,6 +168,7 @@ void MainWindow::browseLeft() {
         m_leftEdit->setText(f);
         updateThumb(m_leftView, f, m_leftPix);
         tryCompare();
+        rebuildNavigation();
     }
 }
 
@@ -144,6 +181,7 @@ void MainWindow::browseRight() {
         m_rightEdit->setText(f);
         updateThumb(m_rightView, f, m_rightPix);
         tryCompare();
+        rebuildNavigation();
     }
 }
 
@@ -224,4 +262,88 @@ void MainWindow::tryCompare() {
 
     m_diffPix = QPixmap::fromImage(matToQImage(diffBgr));
     setLabelPixmap(m_diffView, m_diffPix);
+}
+void MainWindow::rebuildNavigation() {
+    m_navPairs.clear();
+    m_navIndex = -1;
+
+    const QFileInfo leftFi(m_leftEdit->text());
+    const QFileInfo rightFi(m_rightEdit->text());
+    if (!leftFi.exists() || !rightFi.exists()) return;
+
+    const QString leftDir = leftFi.absolutePath();
+    const QString rightDir = rightFi.absolutePath();
+    if (leftDir == rightDir) return; // same directory: nothing meaningful to pair
+
+    const QString leftName = leftFi.fileName();
+    const QString rightName = rightFi.fileName();
+    const QString leftStem = leftFi.completeBaseName();
+    const QString rightStem = rightFi.completeBaseName();
+    const QString leftExt = leftFi.suffix();
+    const QString rightExt = rightFi.suffix();
+
+    QStringList leftFiles = listImages(leftDir);
+    QStringList rightFiles = listImages(rightDir);
+
+    if (leftName.compare(rightName, Qt::CaseInsensitive) == 0) {
+        // Mode A: same filename — intersect file names across dirs.
+        QSet<QString> rightSet;
+        for (const auto &n : rightFiles) rightSet.insert(n.toLower());
+        QStringList common;
+        for (const auto &n : leftFiles) {
+            if (rightSet.contains(n.toLower())) common.append(n);
+        }
+        naturalSort(common);
+        for (const auto &n : common) {
+            m_navPairs.append({QDir(leftDir).absoluteFilePath(n),
+                               QDir(rightDir).absoluteFilePath(n)});
+        }
+    } else if (leftStem.compare(rightStem, Qt::CaseInsensitive) == 0
+               && !leftExt.isEmpty() && !rightExt.isEmpty()) {
+        // Mode B: same stem, different extensions — sync by stem,
+        // each side restricted to its own current extension.
+        const QString leftPattern = "*." + leftExt;
+        const QString rightPattern = "*." + rightExt;
+        QStringList leftSameExt = QDir(leftDir).entryList({leftPattern},
+                                                          QDir::Files | QDir::Readable);
+        QStringList rightSameExt = QDir(rightDir).entryList({rightPattern},
+                                                            QDir::Files | QDir::Readable);
+        QSet<QString> rightStems;
+        for (const auto &n : rightSameExt) {
+            rightStems.insert(QFileInfo(n).completeBaseName().toLower());
+        }
+        QStringList commonStems;
+        for (const auto &n : leftSameExt) {
+            const QString stem = QFileInfo(n).completeBaseName();
+            if (rightStems.contains(stem.toLower())) commonStems.append(stem);
+        }
+        naturalSort(commonStems);
+        for (const auto &stem : commonStems) {
+            m_navPairs.append({QDir(leftDir).absoluteFilePath(stem + "." + leftExt),
+                               QDir(rightDir).absoluteFilePath(stem + "." + rightExt)});
+        }
+    }
+
+    const QString curLeft = leftFi.absoluteFilePath();
+    const QString curRight = rightFi.absoluteFilePath();
+    for (int i = 0; i < m_navPairs.size(); ++i) {
+        if (m_navPairs[i].first == curLeft && m_navPairs[i].second == curRight) {
+            m_navIndex = i;
+            break;
+        }
+    }
+}
+
+void MainWindow::navigate(int delta) {
+    if (m_navPairs.isEmpty() || m_navIndex < 0) return;
+    const int n = m_navPairs.size();
+    const int next = m_navIndex + delta;
+    if (next < 0 || next >= n) return;
+    m_navIndex = next;
+    const auto &p = m_navPairs[next];
+    m_leftEdit->setText(p.first);
+    m_rightEdit->setText(p.second);
+    updateThumb(m_leftView, p.first, m_leftPix);
+    updateThumb(m_rightView, p.second, m_rightPix);
+    tryCompare();
 }

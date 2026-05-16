@@ -2,6 +2,8 @@
 
 #include <QMainWindow>
 #include <QString>
+#include <QVector>
+#include <utility>
 
 class QLineEdit;
 class QLabel;
@@ -24,6 +26,11 @@ private:
     void updateThumb(QLabel *label, const QString &path, QPixmap &cache);
     void rescaleAll();
     void tryCompare();
+    void rebuildNavigation();
+    void navigate(int delta);
+
+    QVector<QPair<QString, QString>> m_navPairs; // absolute (leftPath, rightPath)
+    int m_navIndex{-1};
 
     QPixmap m_leftPix;
     QPixmap m_rightPix;
