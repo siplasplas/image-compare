@@ -13,10 +13,12 @@
 #include <QResizeEvent>
 #include <QSet>
 #include <QShortcut>
+#include <QSlider>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <algorithm>
+#include <cmath>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -122,13 +124,49 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     previews->addWidget(m_rightView, 1);
     root->addLayout(previews, 1);
 
-    // ---- bottom: controls (left, TBD) + diff view (right) -----------------
+    // ---- bottom: sliders (left) + diff view (right) -----------------------
     auto *diffRow = new QHBoxLayout();
+
+    auto *controls = new QVBoxLayout();
+    auto buildSlider = [&](const QString &title, QSlider *&slider, QLabel *&valueLabel) {
+        auto *box = new QVBoxLayout();
+        auto *header = new QHBoxLayout();
+        auto *titleLabel = new QLabel(title);
+        valueLabel = new QLabel("x1.0");
+        valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        header->addWidget(titleLabel);
+        header->addStretch(1);
+        header->addWidget(valueLabel);
+        slider = new QSlider(Qt::Horizontal);
+        slider->setRange(0, 100); // factor = 10^(value/50): 0->1, 50->10, 100->100
+        slider->setValue(0);
+        slider->setTickPosition(QSlider::TicksBelow);
+        slider->setTickInterval(50);
+        box->addLayout(header);
+        box->addWidget(slider);
+        return box;
+    };
+
+    controls->addLayout(buildSlider(tr("Top amplification (L/R)"),
+                                    m_topSlider, m_topSliderLabel));
+    controls->addLayout(buildSlider(tr("Bottom amplification (diff)"),
+                                    m_bottomSlider, m_bottomSliderLabel));
+    controls->addStretch(1);
+    diffRow->addLayout(controls, 1);
+
     m_diffView = makeView();
     m_diffView->setMinimumSize(300, 200);
-    diffRow->addStretch(1); // placeholder for upcoming left-side controls
     diffRow->addWidget(m_diffView, 1);
     root->addLayout(diffRow, 1);
+
+    connect(m_topSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_topSliderLabel->setText(QStringLiteral("x%1").arg(sliderFactor(v), 0, 'f', 1));
+        renderPreviews();
+    });
+    connect(m_bottomSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_bottomSliderLabel->setText(QStringLiteral("x%1").arg(sliderFactor(v), 0, 'f', 1));
+        renderDiff();
+    });
 
     connect(m_leftBtn, &QPushButton::clicked, this, &MainWindow::browseLeft);
     connect(m_rightBtn, &QPushButton::clicked, this, &MainWindow::browseRight);
@@ -224,6 +262,8 @@ void MainWindow::tryCompare() {
     cv::Mat left = cv::imread(leftPath.toStdString(), cv::IMREAD_COLOR);
     cv::Mat right = cv::imread(rightPath.toStdString(), cv::IMREAD_COLOR);
     if (left.empty() || right.empty()) {
+        m_leftMat.release();
+        m_rightMat.release();
         m_diffPix = {};
         m_diffView->clear();
         return;
@@ -231,42 +271,103 @@ void MainWindow::tryCompare() {
 
     if (left.size() != right.size()) {
         cv::resize(right, right, left.size(), 0, 0, cv::INTER_AREA);
+        m_pairIdentical = false;
     } else {
         cv::Mat sameMask;
         cv::absdiff(left, right, sameMask);
-        if (cv::countNonZero(sameMask.reshape(1)) == 0) {
-            m_diffPix = {};
-            m_diffView->setText(tr("Images are identical"));
-            return;
-        }
+        m_pairIdentical = (cv::countNonZero(sameMask.reshape(1)) == 0);
+    }
+
+    m_leftMat = left;
+    m_rightMat = right;
+
+    renderPreviews();
+    renderDiff();
+}
+
+double MainWindow::sliderFactor(int value) {
+    // 0 -> 1.0, 50 -> 10.0, 100 -> 100.0  (logarithmic)
+    return std::pow(10.0, value / 50.0);
+}
+
+void MainWindow::renderPreviews() {
+    if (m_leftMat.empty() || m_rightMat.empty()) return;
+
+    const double k = sliderFactor(m_topSlider ? m_topSlider->value() : 0);
+
+    if (k == 1.0) {
+        m_leftPix = QPixmap::fromImage(matToQImage(m_leftMat));
+        m_rightPix = QPixmap::fromImage(matToQImage(m_rightMat));
+    } else {
+        cv::Mat lf, rf;
+        m_leftMat.convertTo(lf, CV_32F);
+        m_rightMat.convertTo(rf, CV_32F);
+        cv::Mat avg = (lf + rf) * 0.5f;
+        cv::Mat lAmp = avg + (lf - avg) * static_cast<float>(k);
+        cv::Mat rAmp = avg + (rf - avg) * static_cast<float>(k);
+        cv::Mat l8, r8;
+        lAmp.convertTo(l8, CV_8U); // saturates to 0..255
+        rAmp.convertTo(r8, CV_8U);
+        m_leftPix = QPixmap::fromImage(matToQImage(l8));
+        m_rightPix = QPixmap::fromImage(matToQImage(r8));
+    }
+
+    setLabelPixmap(m_leftView, m_leftPix);
+    setLabelPixmap(m_rightView, m_rightPix);
+}
+
+void MainWindow::renderDiff() {
+    if (m_leftMat.empty() || m_rightMat.empty()) return;
+
+    if (m_pairIdentical) {
+        m_diffPix = {};
+        m_diffView->setText(tr("Images are identical"));
+        return;
     }
 
     cv::Mat leftGray, rightGray;
-    cv::cvtColor(left, leftGray, cv::COLOR_BGR2GRAY);
-    cv::cvtColor(right, rightGray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(m_leftMat, leftGray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(m_rightMat, rightGray, cv::COLOR_BGR2GRAY);
 
-    // Build diff: shared content shown as-is in grayscale; red/green overlay only where pixels differ.
     cv::Mat avg;
     cv::addWeighted(leftGray, 0.5, rightGray, 0.5, 0, avg);
 
     cv::Mat diffBgr;
     cv::cvtColor(avg, diffBgr, cv::COLOR_GRAY2BGR);
 
+    const double k = sliderFactor(m_bottomSlider ? m_bottomSlider->value() : 0);
+
     cv::Mat leftHigher, rightHigher;
     cv::subtract(leftGray, rightGray, leftHigher);   // >0 where left brighter
     cv::subtract(rightGray, leftGray, rightHigher);
 
-    const int threshold = 8;
-    cv::Mat leftMask = leftHigher > threshold;   // 8UC1, 0/255
-    cv::Mat rightMask = rightHigher > threshold;
+    cv::Mat leftScaled, rightScaled;
+    leftHigher.convertTo(leftScaled, CV_8U, k);   // saturates to 255
+    rightHigher.convertTo(rightScaled, CV_8U, k);
 
-    // Apply red (BGR: 0,0,255) where left mask, green (0,255,0) where right mask.
-    diffBgr.setTo(cv::Scalar(0, 0, 255), leftMask);
-    diffBgr.setTo(cv::Scalar(0, 255, 0), rightMask);
+    // Replace base pixel with red intensity where left is brighter, green where right is brighter.
+    // Both intensities can't be non-zero on the same pixel (signed diff has one sign).
+    std::vector<cv::Mat> diffChannels;
+    cv::split(diffBgr, diffChannels); // B, G, R
+    // Where right brighter (rightScaled > 0): pixel = (0, rightScaled, 0)
+    // Where left brighter (leftScaled > 0):   pixel = (0, 0, leftScaled)
+    cv::Mat leftMask = leftScaled > 0;
+    cv::Mat rightMask = rightScaled > 0;
+    cv::Mat anyMask;
+    cv::bitwise_or(leftMask, rightMask, anyMask);
+
+    diffChannels[0].setTo(0, anyMask);                     // B = 0 where any diff
+    rightScaled.copyTo(diffChannels[1], rightMask);        // G = rightScaled where right brighter
+    diffChannels[1].setTo(0, leftMask);                    // G = 0 where left brighter
+    leftScaled.copyTo(diffChannels[2], leftMask);          // R = leftScaled where left brighter
+    diffChannels[2].setTo(0, rightMask);                   // R = 0 where right brighter
+
+    cv::merge(diffChannels, diffBgr);
 
     m_diffPix = QPixmap::fromImage(matToQImage(diffBgr));
     setLabelPixmap(m_diffView, m_diffPix);
 }
+
 void MainWindow::rebuildNavigation() {
     m_navPairs.clear();
     m_navIndex = -1;

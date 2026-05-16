@@ -5,9 +5,12 @@
 #include <QVector>
 #include <utility>
 
+#include <opencv2/core.hpp>
+
 class QLineEdit;
 class QLabel;
 class QPushButton;
+class QSlider;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -28,6 +31,9 @@ private:
     void tryCompare();
     void rebuildNavigation();
     void navigate(int delta);
+    void renderPreviews();
+    void renderDiff();
+    static double sliderFactor(int value);
 
     QVector<QPair<QString, QString>> m_navPairs; // absolute (leftPath, rightPath)
     int m_navIndex{-1};
@@ -44,6 +50,15 @@ private:
     QLabel *m_rightView{};
     QLabel *m_diffView{};
     QLabel *m_navLabel{};
+
+    QSlider *m_topSlider{};
+    QSlider *m_bottomSlider{};
+    QLabel *m_topSliderLabel{};
+    QLabel *m_bottomSliderLabel{};
+
+    cv::Mat m_leftMat;   // BGR, original size from disk (or resized right-side to match left)
+    cv::Mat m_rightMat;
+    bool m_pairIdentical{false};
 
     void updateNavLabel();
 };
