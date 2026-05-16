@@ -83,7 +83,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         l->setAlignment(Qt::AlignCenter);
         l->setMinimumSize(200, 150);
         l->setFrameShape(QFrame::StyledPanel);
-        l->setStyleSheet("background:#222;");
+        l->setStyleSheet("background:#222; color:#ddd;");
         return l;
     };
     m_leftView = makeView();
@@ -169,9 +169,9 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::rescaleAll() {
-    setLabelPixmap(m_leftView, m_leftPix);
-    setLabelPixmap(m_rightView, m_rightPix);
-    setLabelPixmap(m_diffView, m_diffPix);
+    if (!m_leftPix.isNull()) setLabelPixmap(m_leftView, m_leftPix);
+    if (!m_rightPix.isNull()) setLabelPixmap(m_rightView, m_rightPix);
+    if (!m_diffPix.isNull()) setLabelPixmap(m_diffView, m_diffPix);
 }
 
 void MainWindow::tryCompare() {
@@ -189,6 +189,14 @@ void MainWindow::tryCompare() {
 
     if (left.size() != right.size()) {
         cv::resize(right, right, left.size(), 0, 0, cv::INTER_AREA);
+    } else {
+        cv::Mat sameMask;
+        cv::absdiff(left, right, sameMask);
+        if (cv::countNonZero(sameMask.reshape(1)) == 0) {
+            m_diffPix = {};
+            m_diffView->setText(tr("Images are identical"));
+            return;
+        }
     }
 
     cv::Mat leftGray, rightGray;
