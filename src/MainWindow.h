@@ -57,6 +57,14 @@ private:
     QLabel *m_topSliderLabel{};
     QLabel *m_bottomSliderLabel{};
     QCheckBox *m_diffsOnly{};
+    QCheckBox *m_refCheck{};
+    QPushButton *m_refBtn{};
+
+    cv::Mat m_refMat;
+    QPixmap m_refPix;
+
+    void browseReference();
+    void updateRefControls();
 
     cv::Mat m_leftMat;   // BGR, original size from disk (or resized right-side to match left)
     cv::Mat m_rightMat;

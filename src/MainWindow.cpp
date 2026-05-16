@@ -15,6 +15,7 @@
 #include <QSet>
 #include <QShortcut>
 #include <QSlider>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -154,6 +155,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                     m_bottomSlider, m_bottomSliderLabel));
     m_diffsOnly = new QCheckBox(tr("Diffs only (replace gray base)"));
     controls->addWidget(m_diffsOnly);
+
+    auto *refRow = new QHBoxLayout();
+    m_refCheck = new QCheckBox(tr("Reference"));
+    m_refCheck->setEnabled(false);
+    m_refBtn = new QPushButton();
+    m_refBtn->setIcon(style()->standardIcon(QStyle::SP_DirOpenIcon));
+    m_refBtn->setToolTip(tr("Load reference image..."));
+    refRow->addWidget(m_refCheck);
+    refRow->addWidget(m_refBtn);
+    refRow->addStretch(1);
+    controls->addLayout(refRow);
+
     controls->addStretch(1);
     diffRow->addLayout(controls, 1);
 
@@ -171,6 +184,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         renderDiff();
     });
     connect(m_diffsOnly, &QCheckBox::toggled, this, [this] { renderDiff(); });
+    connect(m_refBtn, &QPushButton::clicked, this, &MainWindow::browseReference);
+    connect(m_refCheck, &QCheckBox::toggled, this, [this] {
+        updateRefControls();
+        renderDiff();
+    });
 
     connect(m_leftBtn, &QPushButton::clicked, this, &MainWindow::browseLeft);
     connect(m_rightBtn, &QPushButton::clicked, this, &MainWindow::browseRight);
@@ -321,6 +339,12 @@ void MainWindow::renderPreviews() {
 }
 
 void MainWindow::renderDiff() {
+    if (m_refCheck && m_refCheck->isChecked() && !m_refMat.empty()) {
+        m_diffPix = m_refPix;
+        setLabelPixmap(m_diffView, m_diffPix);
+        return;
+    }
+
     if (m_leftMat.empty() || m_rightMat.empty()) return;
 
     if (m_pairIdentical) {
@@ -501,4 +525,34 @@ void MainWindow::navigate(int delta) {
     updateThumb(m_rightView, p.second, m_rightPix);
     tryCompare();
     updateNavLabel();
+}
+
+void MainWindow::browseReference() {
+    const QString f = QFileDialog::getOpenFileName(
+        this, tr("Choose reference image"), {},
+        tr("Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"), nullptr,
+        QFileDialog::DontUseNativeDialog);
+    if (f.isEmpty()) return; // user cancelled — leave checkbox state alone
+
+    cv::Mat img = cv::imread(f.toStdString(), cv::IMREAD_COLOR);
+    if (img.empty()) {
+        m_diffView->setText(tr("Cannot load reference:\n%1").arg(f));
+        return;
+    }
+    m_refMat = img;
+    m_refPix = QPixmap::fromImage(matToQImage(img));
+
+    QSignalBlocker blocker(m_refCheck);
+    m_refCheck->setEnabled(true);
+    m_refCheck->setChecked(true);
+
+    updateRefControls();
+    renderDiff();
+}
+
+void MainWindow::updateRefControls() {
+    const bool refOn = m_refCheck && m_refCheck->isChecked() && !m_refMat.empty();
+    if (m_bottomSlider) m_bottomSlider->setEnabled(!refOn);
+    if (m_bottomSliderLabel) m_bottomSliderLabel->setEnabled(!refOn);
+    if (m_diffsOnly) m_diffsOnly->setEnabled(!refOn);
 }
