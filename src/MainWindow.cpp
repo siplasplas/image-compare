@@ -122,13 +122,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     previews->addWidget(m_rightView, 1);
     root->addLayout(previews, 1);
 
-    // ---- bottom: diff view centered ---------------------------------------
+    // ---- bottom: controls (left, TBD) + diff view (right) -----------------
     auto *diffRow = new QHBoxLayout();
     m_diffView = makeView();
     m_diffView->setMinimumSize(300, 200);
-    diffRow->addStretch(1);
-    diffRow->addWidget(m_diffView, 2);
-    diffRow->addStretch(1);
+    diffRow->addStretch(1); // placeholder for upcoming left-side controls
+    diffRow->addWidget(m_diffView, 1);
     root->addLayout(diffRow, 1);
 
     connect(m_leftBtn, &QPushButton::clicked, this, &MainWindow::browseLeft);
