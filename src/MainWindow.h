@@ -19,11 +19,11 @@ protected:
 private slots:
     void browseLeft();
     void browseRight();
-    void compare();
 
 private:
     void updateThumb(QLabel *label, const QString &path, QPixmap &cache);
     void rescaleAll();
+    void tryCompare();
 
     QPixmap m_leftPix;
     QPixmap m_rightPix;
@@ -33,7 +33,6 @@ private:
     QLineEdit *m_rightEdit{};
     QPushButton *m_leftBtn{};
     QPushButton *m_rightBtn{};
-    QPushButton *m_compareBtn{};
     QLabel *m_leftView{};
     QLabel *m_rightView{};
     QLabel *m_diffView{};

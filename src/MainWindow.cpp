@@ -4,7 +4,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -77,9 +76,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     selectors->addLayout(buildSelector(tr("Right image..."), m_rightEdit, m_rightBtn), 1);
     root->addLayout(selectors);
 
-    m_compareBtn = new QPushButton(tr("Compare"));
-    root->addWidget(m_compareBtn);
-
     // ---- middle: two image previews ---------------------------------------
     auto *previews = new QHBoxLayout();
     auto makeView = [&]() {
@@ -107,11 +103,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     connect(m_leftBtn, &QPushButton::clicked, this, &MainWindow::browseLeft);
     connect(m_rightBtn, &QPushButton::clicked, this, &MainWindow::browseRight);
-    connect(m_compareBtn, &QPushButton::clicked, this, &MainWindow::compare);
-    connect(m_leftEdit, &QLineEdit::editingFinished, this,
-            [this] { updateThumb(m_leftView, m_leftEdit->text(), m_leftPix); });
-    connect(m_rightEdit, &QLineEdit::editingFinished, this,
-            [this] { updateThumb(m_rightView, m_rightEdit->text(), m_rightPix); });
+    connect(m_leftEdit, &QLineEdit::editingFinished, this, [this] {
+        updateThumb(m_leftView, m_leftEdit->text(), m_leftPix);
+        tryCompare();
+    });
+    connect(m_rightEdit, &QLineEdit::editingFinished, this, [this] {
+        updateThumb(m_rightView, m_rightEdit->text(), m_rightPix);
+        tryCompare();
+    });
 
     resize(1100, 800);
 }
@@ -119,7 +118,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 void MainWindow::setImages(const QString &left, const QString &right) {
     m_leftEdit->setText(left);
     m_rightEdit->setText(right);
-    compare();
+    updateThumb(m_leftView, left, m_leftPix);
+    updateThumb(m_rightView, right, m_rightPix);
+    tryCompare();
 }
 
 void MainWindow::browseLeft() {
@@ -130,6 +131,7 @@ void MainWindow::browseLeft() {
     if (!f.isEmpty()) {
         m_leftEdit->setText(f);
         updateThumb(m_leftView, f, m_leftPix);
+        tryCompare();
     }
 }
 
@@ -141,6 +143,7 @@ void MainWindow::browseRight() {
     if (!f.isEmpty()) {
         m_rightEdit->setText(f);
         updateThumb(m_rightView, f, m_rightPix);
+        tryCompare();
     }
 }
 
@@ -171,23 +174,18 @@ void MainWindow::rescaleAll() {
     setLabelPixmap(m_diffView, m_diffPix);
 }
 
-void MainWindow::compare() {
+void MainWindow::tryCompare() {
     const QString leftPath = m_leftEdit->text();
     const QString rightPath = m_rightEdit->text();
+    if (leftPath.isEmpty() || rightPath.isEmpty()) return;
 
     cv::Mat left = cv::imread(leftPath.toStdString(), cv::IMREAD_COLOR);
     cv::Mat right = cv::imread(rightPath.toStdString(), cv::IMREAD_COLOR);
-
     if (left.empty() || right.empty()) {
-        QMessageBox::warning(this, tr("Compare"),
-                             tr("Cannot load one or both images."));
+        m_diffPix = {};
+        m_diffView->clear();
         return;
     }
-
-    m_leftPix = QPixmap::fromImage(matToQImage(left));
-    m_rightPix = QPixmap::fromImage(matToQImage(right));
-    setLabelPixmap(m_leftView, m_leftPix);
-    setLabelPixmap(m_rightView, m_rightPix);
 
     if (left.size() != right.size()) {
         cv::resize(right, right, left.size(), 0, 0, cv::INTER_AREA);
