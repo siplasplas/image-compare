@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <QCheckBox>
 #include <QCollator>
 #include <QDir>
 #include <QFileDialog>
@@ -151,6 +152,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                                     m_topSlider, m_topSliderLabel));
     controls->addLayout(buildSlider(tr("Bottom amplification (diff)"),
                                     m_bottomSlider, m_bottomSliderLabel));
+    m_diffsOnly = new QCheckBox(tr("Diffs only (replace gray base)"));
+    controls->addWidget(m_diffsOnly);
     controls->addStretch(1);
     diffRow->addLayout(controls, 1);
 
@@ -167,6 +170,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         m_bottomSliderLabel->setText(QStringLiteral("x%1").arg(sliderFactor(v), 0, 'f', 1));
         renderDiff();
     });
+    connect(m_diffsOnly, &QCheckBox::toggled, this, [this] { renderDiff(); });
 
     connect(m_leftBtn, &QPushButton::clicked, this, &MainWindow::browseLeft);
     connect(m_rightBtn, &QPushButton::clicked, this, &MainWindow::browseRight);
@@ -345,22 +349,54 @@ void MainWindow::renderDiff() {
     leftHigher.convertTo(leftScaled, CV_8U, k);   // saturates to 255
     rightHigher.convertTo(rightScaled, CV_8U, k);
 
-    // Replace base pixel with red intensity where left is brighter, green where right is brighter.
-    // Both intensities can't be non-zero on the same pixel (signed diff has one sign).
     std::vector<cv::Mat> diffChannels;
     cv::split(diffBgr, diffChannels); // B, G, R
-    // Where right brighter (rightScaled > 0): pixel = (0, rightScaled, 0)
-    // Where left brighter (leftScaled > 0):   pixel = (0, 0, leftScaled)
+    cv::Mat &chB = diffChannels[0];
+    cv::Mat &chG = diffChannels[1];
+    cv::Mat &chR = diffChannels[2];
     cv::Mat leftMask = leftScaled > 0;
     cv::Mat rightMask = rightScaled > 0;
-    cv::Mat anyMask;
-    cv::bitwise_or(leftMask, rightMask, anyMask);
 
-    diffChannels[0].setTo(0, anyMask);                     // B = 0 where any diff
-    rightScaled.copyTo(diffChannels[1], rightMask);        // G = rightScaled where right brighter
-    diffChannels[1].setTo(0, leftMask);                    // G = 0 where left brighter
-    leftScaled.copyTo(diffChannels[2], leftMask);          // R = leftScaled where left brighter
-    diffChannels[2].setTo(0, rightMask);                   // R = 0 where right brighter
+    if (m_diffsOnly && m_diffsOnly->isChecked()) {
+        // Replace base pixel entirely with colored intensity.
+        cv::Mat anyMask;
+        cv::bitwise_or(leftMask, rightMask, anyMask);
+        chB.setTo(0, anyMask);
+        rightScaled.copyTo(chG, rightMask);
+        chG.setTo(0, leftMask);
+        leftScaled.copyTo(chR, leftMask);
+        chR.setTo(0, rightMask);
+    } else {
+        // Blend over gray base: alpha = scaled/255. pixel = base*(1-a) + color*a.
+        // For left brighter: target = (0,0,255), so:
+        //   B' = base * (1-a),  G' = base * (1-a),  R' = base * (1-a) + 255 * a
+        // Symmetric for right (green).
+        cv::Mat baseF;
+        avg.convertTo(baseF, CV_32F);
+
+        auto applyOverlay = [&](const cv::Mat &scaled, const cv::Mat &mask,
+                                int targetChannelIdx) {
+            cv::Mat alpha;
+            scaled.convertTo(alpha, CV_32F, 1.0 / 255.0);
+            cv::Mat invA = 1.0f - alpha;
+            cv::Mat baseDim = baseF.mul(invA);
+            cv::Mat baseDim8;
+            baseDim.convertTo(baseDim8, CV_8U);
+            // For non-target channels: pixel = baseDim
+            for (int ch = 0; ch < 3; ++ch) {
+                if (ch == targetChannelIdx) continue;
+                baseDim8.copyTo(diffChannels[ch], mask);
+            }
+            // For target channel: pixel = baseDim + 255 * alpha
+            cv::Mat targetF = baseDim + alpha * 255.0f;
+            cv::Mat target8;
+            targetF.convertTo(target8, CV_8U);
+            target8.copyTo(diffChannels[targetChannelIdx], mask);
+        };
+
+        applyOverlay(leftScaled, leftMask, 2);   // red channel
+        applyOverlay(rightScaled, rightMask, 1); // green channel
+    }
 
     cv::merge(diffChannels, diffBgr);
 

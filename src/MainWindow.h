@@ -11,6 +11,7 @@ class QLineEdit;
 class QLabel;
 class QPushButton;
 class QSlider;
+class QCheckBox;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -55,6 +56,7 @@ private:
     QSlider *m_bottomSlider{};
     QLabel *m_topSliderLabel{};
     QLabel *m_bottomSliderLabel{};
+    QCheckBox *m_diffsOnly{};
 
     cv::Mat m_leftMat;   // BGR, original size from disk (or resized right-side to match left)
     cv::Mat m_rightMat;
