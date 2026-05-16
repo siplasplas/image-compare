@@ -195,15 +195,12 @@ void MainWindow::tryCompare() {
     cv::cvtColor(left, leftGray, cv::COLOR_BGR2GRAY);
     cv::cvtColor(right, rightGray, cv::COLOR_BGR2GRAY);
 
-    // Build diff: gray base where similar; red where left brighter, green where right brighter.
+    // Build diff: shared content shown as-is in grayscale; red/green overlay only where pixels differ.
     cv::Mat avg;
     cv::addWeighted(leftGray, 0.5, rightGray, 0.5, 0, avg);
-    // Tone down the gray base so colored highlights stand out.
-    cv::Mat dimGray;
-    avg.convertTo(dimGray, CV_8U, 0.6);
 
     cv::Mat diffBgr;
-    cv::cvtColor(dimGray, diffBgr, cv::COLOR_GRAY2BGR);
+    cv::cvtColor(avg, diffBgr, cv::COLOR_GRAY2BGR);
 
     cv::Mat leftHigher, rightHigher;
     cv::subtract(leftGray, rightGray, leftHigher);   // >0 where left brighter
