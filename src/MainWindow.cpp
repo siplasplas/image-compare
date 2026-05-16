@@ -336,8 +336,14 @@ void MainWindow::renderDiff() {
     cv::Mat avg;
     cv::addWeighted(leftGray, 0.5, rightGray, 0.5, 0, avg);
 
+    const bool diffsOnly = m_diffsOnly && m_diffsOnly->isChecked();
+
     cv::Mat diffBgr;
-    cv::cvtColor(avg, diffBgr, cv::COLOR_GRAY2BGR);
+    if (diffsOnly) {
+        diffBgr = cv::Mat::zeros(avg.size(), CV_8UC3); // black background
+    } else {
+        cv::cvtColor(avg, diffBgr, cv::COLOR_GRAY2BGR);
+    }
 
     const double k = sliderFactor(m_bottomSlider ? m_bottomSlider->value() : 0);
 
@@ -357,15 +363,10 @@ void MainWindow::renderDiff() {
     cv::Mat leftMask = leftScaled > 0;
     cv::Mat rightMask = rightScaled > 0;
 
-    if (m_diffsOnly && m_diffsOnly->isChecked()) {
-        // Replace base pixel entirely with colored intensity.
-        cv::Mat anyMask;
-        cv::bitwise_or(leftMask, rightMask, anyMask);
-        chB.setTo(0, anyMask);
+    if (diffsOnly) {
+        // Black background; only diff pixels get colored intensity.
         rightScaled.copyTo(chG, rightMask);
-        chG.setTo(0, leftMask);
         leftScaled.copyTo(chR, leftMask);
-        chR.setTo(0, rightMask);
     } else {
         // Blend over gray base: alpha = scaled/255. pixel = base*(1-a) + color*a.
         // For left brighter: target = (0,0,255), so:
