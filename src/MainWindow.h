@@ -62,9 +62,13 @@ private:
 
     cv::Mat m_refMat;
     QPixmap m_refPix;
+    bool m_refSyncByStem{false};
+    QString m_refDir;
+    QString m_refExt;
 
     void browseReference();
     void updateRefControls();
+    void syncReferenceForPair();
 
     cv::Mat m_leftMat;   // BGR, original size from disk (or resized right-side to match left)
     cv::Mat m_rightMat;

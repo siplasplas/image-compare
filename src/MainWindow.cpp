@@ -523,6 +523,7 @@ void MainWindow::navigate(int delta) {
     m_rightEdit->setText(p.second);
     updateThumb(m_leftView, p.first, m_leftPix);
     updateThumb(m_rightView, p.second, m_rightPix);
+    syncReferenceForPair();
     tryCompare();
     updateNavLabel();
 }
@@ -542,12 +543,46 @@ void MainWindow::browseReference() {
     m_refMat = img;
     m_refPix = QPixmap::fromImage(matToQImage(img));
 
+    const QFileInfo refFi(f);
+    const QFileInfo leftFi(m_leftEdit->text());
+    const QFileInfo rightFi(m_rightEdit->text());
+    const QString refStem = refFi.completeBaseName();
+    const QString leftStem = leftFi.completeBaseName();
+    const QString rightStem = rightFi.completeBaseName();
+    m_refSyncByStem = !leftStem.isEmpty()
+                      && leftStem.compare(rightStem, Qt::CaseInsensitive) == 0
+                      && leftStem.compare(refStem, Qt::CaseInsensitive) == 0;
+    m_refDir = refFi.absolutePath();
+    m_refExt = refFi.suffix();
+
     QSignalBlocker blocker(m_refCheck);
     m_refCheck->setEnabled(true);
     m_refCheck->setChecked(true);
 
     updateRefControls();
     renderDiff();
+}
+
+void MainWindow::syncReferenceForPair() {
+    if (!m_refSyncByStem || m_refDir.isEmpty() || m_refExt.isEmpty()) return;
+
+    const QFileInfo leftFi(m_leftEdit->text());
+    const QFileInfo rightFi(m_rightEdit->text());
+    const QString leftStem = leftFi.completeBaseName();
+    const QString rightStem = rightFi.completeBaseName();
+    if (leftStem.isEmpty()
+        || leftStem.compare(rightStem, Qt::CaseInsensitive) != 0) {
+        return;
+    }
+
+    const QString candidate = QDir(m_refDir).absoluteFilePath(leftStem + "." + m_refExt);
+    if (!QFileInfo::exists(candidate)) return;
+
+    cv::Mat img = cv::imread(candidate.toStdString(), cv::IMREAD_COLOR);
+    if (img.empty()) return;
+
+    m_refMat = img;
+    m_refPix = QPixmap::fromImage(matToQImage(img));
 }
 
 void MainWindow::updateRefControls() {
